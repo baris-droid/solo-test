@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Premium Solo Test - Ahşap Serisi</title>
+    <style>
+        :root {
+            --bg-color: #2c1e14;
+            --board-color: #5d4037;
+            --hole-color: #3e2723;
+            --peg-color: #d7ccc8;
+            --peg-selected: #ff5722;
+            --text-color: #fbe9e7;
+            --accent-color: #8d6e63;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+
+        body {
+            background-color: var(--bg-color);
+            background-image: url('https://www.transparenttextures.com/patterns/dark-wood.png');
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            color: var(--text-color);
+        }
+
+        .header { text-align: center; margin-bottom: 20px; }
+        .stats { display: flex; gap: 20px; margin-bottom: 15px; font-size: 1.1rem; }
+
+        /* Oyun Tahtası */
+        .board {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            grid-template-rows: repeat(7, 1fr);
+            gap: 8px;
+            background: var(--board-color);
+            padding: 20px;
+            border-radius: 50%;
+            box-shadow: inset 0 0 50px #2a1b14, 0 10px 30px rgba(0,0,0,0.5);
+            border: 8px solid var(--accent-color);
+            aspect-ratio: 1/1;
+            width: 90vw;
+            max-width: 500px;
+        }
+
+        .cell {
+            aspect-ratio: 1/1;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .cell.invalid { visibility: hidden; }
+
+        .cell.hole {
+            background-color: var(--hole-color);
+            box-shadow: inset 0 4px 8px rgba(0,0,0,0.6);
+        }
+
+        .peg {
+            width: 80%;
+            height: 80%;
+            background: radial-gradient(circle at 30% 30%, var(--peg-color), #8d6e63);
+            border-radius: 50%;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.4);
+            transition: transform 0.2s, background 0.3s;
+        }
+
+        .peg.selected {
+            background: radial-gradient(circle at 30% 30%, var(--peg-selected), #bf360c);
+            transform: scale(1.15);
+            box-shadow: 0 0 15px var(--peg-selected);
+        }
+
+        /* Kontroller */
+        .controls { margin-top: 30px; display: flex; gap: 15px; }
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            background: var(--accent-color);
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            transition: filter 0.2s;
+            box-shadow: 0 4px 0 #5d4037;
+        }
+        button:active { transform: translateY(2px); box-shadow: 0 2px 0 #5d4037; }
+        button:hover { filter: brightness(1.2); }
+
+        /* Modal (Sonuç Ekranı) */
+        #modal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.85);
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+            padding: 20px;
+        }
+        .modal-content {
+            background: var(--board-color);
+            padding: 40px;
+            border-radius: 20px;
+            text-align: center;
+            border: 4px solid var(--accent-color);
+            max-width: 400px;
+        }
+        .result-title { font-size: 2.5rem; margin-bottom: 10px; color: var(--peg-selected); }
+        .result-desc { font-size: 1.2rem; margin-bottom: 20px; }
+
+        @media (max-width: 400px) {
+            .board { gap: 4px; padding: 10px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>SOLO TEST</h1>
+    <p>Ahşap Koleksiyonu</p>
+</div>
+
+<div class="stats">
+    <div>Piyon: <span id="peg-count">32</span></div>
+    <div>En İyi: <span id="best-score">-</span></div>
+</div>
+
+<div class="board" id="board"></div>
+
+<div class="controls">
+    <button onclick="undo()">GERİ AL</button>
+    <button onclick="resetGame()">YENİ OYUN</button>
+</div>
+
+<div id="modal">
+    <div class="modal-content">
+        <h2 id="modal-rank" class="result-title">BİLGİN</h2>
+        <p id="modal-msg" class="result-desc">Mükemmel! Sadece 1 piyon bıraktın.</p>
+        <button onclick="closeModal()">TEKRAR DENE</button>
+    </div>
+</div>
+
+<script>
+    const boardSize = 7;
+    let boardState = [];
+    let selectedCell = null;
+    let history = [];
+
+    // Klasik İngiliz Tahtası Şablonu (1: Piyon, 0: Boş, -1: Geçersiz)
+    const initialLayout = [
+        [-1, -1,  1,  1,  1, -1, -1],
+        [-1, -1,  1,  1,  1, -1, -1],
+        [ 1,  1,  1,  1,  1,  1,  1],
+        [ 1,  1,  1,  0,  1,  1,  1],
+        [ 1,  1,  1,  1,  1,  1,  1],
+        [-1, -1,  1,  1,  1, -1, -1],
+        [-1, -1,  1,  1,  1, -1, -1]
+    ];
+
+    const results = {
+        1: { title: "BİLGİN", msg: "Dahi seviyesinde bir oyun!" },
+        2: { title: "ZEKİ", msg: "Harika bir zeka örneği." },
+        3: { title: "KURNAZ", msg: "Oldukça başarılı bir sonuç." },
+        4: { title: "BAŞARILI", msg: "Ortalamanın üzerindesin." },
+        5: { title: "NORMAL", msg: "Daha dikkatli olmalısın." },
+        6: { title: "TECRÜBESİZ", msg: "Pratiğe ihtiyacın var." },
+        7: { title: "APTAL", msg: "Biraz daha odaklanmalısın." },
+        8: { title: "GERİZEKALI", msg: "Pek iyi gitmedi..." },
+        9: { title: "BEYİNSİZ", msg: "Solo Test senin için zor görünüyor." }
+    };
+
+    function initGame() {
+        boardState = JSON.parse(JSON.stringify(initialLayout));
+        history = [];
+        renderBoard();
+        updateStats();
+        loadBestScore();
+    }
+
+    function renderBoard() {
+        const boardEl = document.getElementById('board');
+        boardEl.innerHTML = '';
+        
+        for (let r = 0; r < boardSize; r++) {
+            for (let c = 0; c < boardSize; c++) {
+                const cell = document.createElement('div');
+                cell.classList.add('cell');
+                
+                if (boardState[r][c] === -1) {
+                    cell.classList.add('invalid');
+                } else {
+                    cell.classList.add('hole');
+                    cell.onclick = () => handleCellClick(r, c);
+                    
+                    if (boardState[r][c] === 1) {
+                        const peg = document.createElement('div');
+                        peg.classList.add('peg');
+                        if (selectedCell && selectedCell.r === r && selectedCell.c === c) {
+                            peg.classList.add('selected');
+                        }
+                        cell.appendChild(peg);
+                    }
+                }
+                boardEl.appendChild(cell);
+            }
+        }
+    }
+
+    function handleCellClick(r, c) {
+        if (boardState[r][c] === 1) {
+            // Piyon seçme
+            selectedCell = { r, c };
+            renderBoard();
+        } else if (boardState[r][c] === 0 && selectedCell) {
+            // Hedef noktaya hareket denemesi
+            tryMove(selectedCell, { r, c });
+        }
+    }
+
+    function tryMove(from, to) {
+        const rowDiff = Math.abs(from.r - to.r);
+        const colDiff = Math.abs(from.c - to.c);
+
+        if ((rowDiff === 2 && colDiff === 0) || (rowDiff === 0 && colDiff === 2)) {
+            const midR = (from.r + to.r) / 2;
+            const midC = (from.c + to.c) / 2;
+
+            if (boardState[midR][midC] === 1) {
+                // Hamleyi kaydet (Undo için)
+                history.push(JSON.stringify(boardState));
+                
+                // Hamleyi uygula
+                boardState[from.r][from.c] = 0;
+                boardState[midR][midC] = 0;
+                boardState[to.r][to.c] = 1;
+                
+                selectedCell = null;
+                renderBoard();
+                updateStats();
+                checkGameOver();
+            }
+        }
+    }
+
+    function undo() {
+        if (history.length > 0) {
+            boardState = JSON.parse(history.pop());
+            selectedCell = null;
+            renderBoard();
+            updateStats();
+        }
+    }
+
+    function updateStats() {
+        const count = boardState.flat().filter(x => x === 1).length;
+        document.getElementById('peg-count').innerText = count;
+        return count;
+    }
+
+    function checkGameOver() {
+        // Hareket imkanı kalıp kalmadığını kontrol et
+        let canMove = false;
+        for (let r = 0; r < boardSize; r++) {
+            for (let c = 0; c < boardSize; c++) {
+                if (boardState[r][c] === 1) {
+                    const dirs = [[0,2], [0,-2], [2,0], [-2,0]];
+                    for (let [dr, dc] of dirs) {
+                        const nr = r + dr, nc = c + dc;
+                        const mr = r + dr/2, mc = c + dc/2;
+                        if (nr >= 0 && nr < 7 && nc >= 0 && nc < 7) {
+                            if (boardState[nr][nc] === 0 && boardState[mr][mc] === 1) {
+                                canMove = true; break;
+                            }
+                        }
+                    }
+                }
+                if (canMove) break;
+            }
+            if (canMove) break;
+        }
+
+        if (!canMove) {
+            const finalCount = updateStats();
+            saveBestScore(finalCount);
+            showResult(finalCount);
+        }
+    }
+
+    function showResult(count) {
+        const rankData = results[count] || (count >= 9 ? results[9] : results[1]);
+        document.getElementById('modal-rank').innerText = rankData.title;
+        document.getElementById('modal-msg').innerText = `${count} piyon kaldı. ${rankData.msg}`;
+        document.getElementById('modal').style.display = 'flex';
+    }
+
+    function saveBestScore(score) {
+        const best = localStorage.getItem('soloTestBest');
+        if (!best || score < best) {
+            localStorage.setItem('soloTestBest', score);
+            loadBestScore();
+        }
+    }
+
+    function loadBestScore() {
+        const best = localStorage.getItem('soloTestBest');
+        document.getElementById('best-score').innerText = best ? best : '-';
+    }
+
+    function resetGame() {
+        initGame();
+    }
+
+    function closeModal() {
+        document.getElementById('modal').style.display = 'none';
+        resetGame();
+    }
+
+    initGame();
+</script>
+</body>
+</html>
